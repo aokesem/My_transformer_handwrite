@@ -32,8 +32,9 @@ class RMSnorm(nn.Module):
         # RMS = torch.sqrt(torch.mean(x^2,dim=-1)/dim + eps)
         # torch.mean()已经包含了除以维度的操作，不需要再除以dim，属性访问必须通过self
         RMS = torch.sqrt(torch.mean(x*x,dim=-1,keepdim=True)+self.eps)
-        rmsnorm = x/RMS * self.weight
-        return rmsnorm
+        rmsnorm_x = x/RMS * self.weight
+
+        return rmsnorm_x
 
 
 
@@ -52,22 +53,47 @@ class Head(nn.Module):
         #RMSnorm参数
         self.scale = head_size ** -0.5
 
-        #RoPE
+        #RoPE Part1
         self.inv_freq = 1/(theta ** (torch.arange(0,head_size,2)/head_size))
-        self.pos = torch.arange(0,block_size-1)
-        self.freqs = torch.outer(self.inv_freq,self.pos)
+        self.pos = torch.arange(0,block_size)#不是block_size-1
+        self.freqs = torch.outer(self.pos,self.inv_freq) #freqs.shape = [T,H/2] (block_size,head_size/2)
 
-        cos_values = self.freqs.cos()
-        sin_values = self.freqs.sin()
+        self.extend_freqs = torch.repeat_interleave(self.freqs,repeats=2,dim=-1)
+        self.cos_values = self.extend_freqs.cos()
+        self.sin_values = self.extend_freqs.sin()
+        self.register_buffer("cos_values",self.cos_values)
+        self.register_buffer("sin_values",self.sin_values)
+
+    #RoPE Part2
+    def apply_rotary_emb(self,x):
+        # x为q，k，shape = [B,T,H]
+        #(q0, q1, q2, q3, q4, q5,…)变为(-q1, q0, -q3, q2, -q5, q4, ……)
+        T = x.shape[1]
+
+        x_2k = x[...,::2]
+        x_2k1 = x[...,1::2]
+        stacked = torch.stack((-x_2k1, x_2k), dim=-1)
+        x_rot = torch.flatten(stacked,-2,-1)
+
+        cos_T = self.cos_values[:T,...]
+        sin_T = self.sin_values[:T,...]
+
+        return x*cos_T + x_rot*sin_T
 
 
     def forward(self,x):
         # q,k,v形状[Batch_size,sequence_length,head_size]
-        B,T,C = x.shape()# Batch, Time (sequence length), Channels (n_embed) 从输入x的形状中获取参数
+        B,T,C = x.shape# Batch, Time (sequence length), Channels (n_embed) 从输入x的形状中获取参数
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
+
+        #RoPE Part2
+        q = self.apply_rotary_emb(q)
+        k = self.apply_rotary_emb(k)
+
         attention_score = q @ k.transpose(-1,-2) * self.scale
+
         # 将mask裁剪为[T,T]形状
         mask = (self.tril[:T, :T] == 0)
         mask_score = attention_score.masked_fill(mask, float('-inf'))
