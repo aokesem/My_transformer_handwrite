@@ -5,7 +5,7 @@ from torch.nn import functional as F
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # 你的显卡就在这里登场
 
 #训练/优化时的超参数
-max_iters = 3000    # 训练轮数：一共要把模型扔进锅里练 3000 次
+max_iters = 3000     # 训练轮数：一共要把模型扔进锅里练 3000 次
 learning_rate = 1e-2 # 学习率：每次根据错误调整参数的幅度
 eval_interval = 300  # 评估间隔：每训练 300 步，停下来检查一下“学习成绩”
 eval_iter = 200      # 评估迭代次数：每次检查时，随机抽 200 道题来算平均分
@@ -246,17 +246,3 @@ for iter in range(max_iters):
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
 generated_text = decode(model.generate(context, max_token=500)[0].tolist())
 print(generated_text)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
